@@ -88,7 +88,6 @@ namespace OCR.API.Controllers
                 }
             }
         }
-
         private static Dictionary<string, string> ExtractRelevantData(string ocrText)
         {
             var extractedData = new Dictionary<string, string>();
@@ -96,42 +95,40 @@ namespace OCR.API.Controllers
             // Normalize the text (remove extra spaces, new lines, and common OCR noise like special chars)
             ocrText = Regex.Replace(ocrText, @"[\s\W]+", " ").Trim();
 
+            // Fix OCR error for 'Bith' -> 'Birth'
+            ocrText = ocrText.Replace("Bith", "Birth");
+
             // Extract Name (More robust handling for OCR issues)
             var nameMatch = Regex.Match(ocrText, @"(?i)(Name|Full\s*Name)[:\s]*([A-Za-z\s]+)", RegexOptions.IgnoreCase);
             if (nameMatch.Success)
             {
                 extractedData["Name"] = nameMatch.Groups[2].Value.Trim();
             }
-            else
+
+            // Extract Date of Birth (Look for variations of "Birth" including "8irth")
+            var birthMatch = Regex.Match(ocrText, @"(?i)(Birth)[^0-9]*(\d{1,2}[A-Za-z]{3}\d{4}|\d{1,2}\s*[A-Za-z]+\s*\d{4})", RegexOptions.IgnoreCase);
+            if (birthMatch.Success)
             {
-                // Try extracting 'Name' with some flexibility for missing/incorrect spacing or characters
-                var nameFallbackMatch = Regex.Match(ocrText, @"(?i)([A-Za-z\s]+)", RegexOptions.IgnoreCase);
-                if (nameFallbackMatch.Success)
+                string dateText = birthMatch.Groups[2].Value.Trim();
+
+                // Try parsing the extracted date text
+                DateTime dob;
+                if (DateTime.TryParse(dateText, out dob))
                 {
-                    extractedData["Name"] = nameFallbackMatch.Groups[1].Value.Trim();
+                    extractedData["Date of Birth"] = dob.ToString("dd MMM yyyy");
                 }
-            }
-
-            // Extract Date of Birth
-            var dobMatch = Regex.Match(ocrText, @"(?i)(Date\s*of\s*Birth)[:\s]*(\d{4})", RegexOptions.IgnoreCase);
-            if (dobMatch.Success)
-            {
-                var year = dobMatch.Groups[2].Value.Trim();
-
-                // Try to get the day and month before the 4-digit year
-                var dayMonthMatch = Regex.Match(ocrText, $@"(\d{{1,2}}[A-Za-z\s]+){year}", RegexOptions.IgnoreCase);
-                if (dayMonthMatch.Success)
+                else
                 {
-                    string dayMonth = dayMonthMatch.Groups[1].Value.Trim();
-                    // Assuming the format is "DD Month" or "Month DD" (e.g., 13 Dec, Dec 13)
-                    string[] parts = dayMonth.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 2)
+                    // Handle more complex date formats or fallback logic
+                    string[] parts = dateText.Split(new[] { ' ', '/' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 3)
                     {
                         string day = parts[0];
                         string month = parts[1];
+                        string year = parts[2];
 
-                        // Validate and create the date format
-                        if (DateTime.TryParse($"{day} {month} {year}", out DateTime dob))
+                        // Validate and try parsing the date
+                        if (DateTime.TryParse($"{day} {month} {year}", out dob))
                         {
                             extractedData["Date of Birth"] = dob.ToString("dd MMM yyyy");
                         }
@@ -165,6 +162,7 @@ namespace OCR.API.Controllers
 
             return extractedData;
         }
+
 
     }
 
