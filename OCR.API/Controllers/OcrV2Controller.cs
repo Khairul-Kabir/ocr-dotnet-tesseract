@@ -93,36 +93,79 @@ namespace OCR.API.Controllers
         {
             var extractedData = new Dictionary<string, string>();
 
-            // Extract Name
-            var nameMatch = Regex.Match(ocrText, @"\bName\s*\n(.+)", RegexOptions.IgnoreCase);
+            // Normalize the text (remove extra spaces, new lines, and common OCR noise like special chars)
+            ocrText = Regex.Replace(ocrText, @"[\s\W]+", " ").Trim();
+
+            // Extract Name (More robust handling for OCR issues)
+            var nameMatch = Regex.Match(ocrText, @"(?i)(Name|Full\s*Name)[:\s]*([A-Za-z\s]+)", RegexOptions.IgnoreCase);
             if (nameMatch.Success)
             {
-                extractedData["Name"] = nameMatch.Groups[1].Value.Trim();
+                extractedData["Name"] = nameMatch.Groups[2].Value.Trim();
             }
-
-            // Extract Blood Group
-            var bloodGroupMatch = Regex.Match(ocrText, @"Blood Group:\s*([A|B|O|AB][+-])", RegexOptions.IgnoreCase);
-            if (bloodGroupMatch.Success)
+            else
             {
-                extractedData["Blood Group"] = bloodGroupMatch.Groups[1].Value.Trim();
+                // Try extracting 'Name' with some flexibility for missing/incorrect spacing or characters
+                var nameFallbackMatch = Regex.Match(ocrText, @"(?i)([A-Za-z\s]+)", RegexOptions.IgnoreCase);
+                if (nameFallbackMatch.Success)
+                {
+                    extractedData["Name"] = nameFallbackMatch.Groups[1].Value.Trim();
+                }
             }
 
             // Extract Date of Birth
-            var dobMatch = Regex.Match(ocrText, @"Date\s*of\s*Birth\s*(\d{2}\s\w{3}\s\d{4})", RegexOptions.IgnoreCase);
+            var dobMatch = Regex.Match(ocrText, @"(?i)(Date\s*of\s*Birth)[:\s]*(\d{4})", RegexOptions.IgnoreCase);
             if (dobMatch.Success)
             {
-                extractedData["Date of Birth"] = dobMatch.Groups[1].Value.Trim();
+                var year = dobMatch.Groups[2].Value.Trim();
+
+                // Try to get the day and month before the 4-digit year
+                var dayMonthMatch = Regex.Match(ocrText, $@"(\d{{1,2}}[A-Za-z\s]+){year}", RegexOptions.IgnoreCase);
+                if (dayMonthMatch.Success)
+                {
+                    string dayMonth = dayMonthMatch.Groups[1].Value.Trim();
+                    // Assuming the format is "DD Month" or "Month DD" (e.g., 13 Dec, Dec 13)
+                    string[] parts = dayMonth.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 2)
+                    {
+                        string day = parts[0];
+                        string month = parts[1];
+
+                        // Validate and create the date format
+                        if (DateTime.TryParse($"{day} {month} {year}", out DateTime dob))
+                        {
+                            extractedData["Date of Birth"] = dob.ToString("dd MMM yyyy");
+                        }
+                    }
+                }
             }
 
-            // Extract ID Number
-            var idMatch = Regex.Match(ocrText, @"\b(\d{10})\b");
+            // Extract ID Number (Handle 10, 13, or 17 digit long ID numbers)
+            var idMatch = Regex.Match(ocrText, @"(?i)(\d{10}|\d{13}|\d{17})", RegexOptions.IgnoreCase);
             if (idMatch.Success)
             {
                 extractedData["ID Number"] = idMatch.Groups[1].Value.Trim();
             }
 
+            // Extract Blood Group (Handle variations like "Blood group" and different formats of A, B, O, AB, +, -)
+            var bloodGroupMatch = Regex.Match(ocrText, @"(?i)(Blood\s*Group|Blood\s*Type)[:\s]*([A|B|O|AB][+-]?)", RegexOptions.IgnoreCase);
+            if (bloodGroupMatch.Success)
+            {
+                extractedData["Blood Group"] = bloodGroupMatch.Groups[2].Value.Trim();
+            }
+
+            // Handle fallback for missing ID numbers by extracting ID from the text if no specific label found
+            if (!extractedData.ContainsKey("ID Number"))
+            {
+                var idFallbackMatch = Regex.Match(ocrText, @"(\d{10}|\d{13}|\d{17})", RegexOptions.IgnoreCase);
+                if (idFallbackMatch.Success)
+                {
+                    extractedData["ID Number"] = idFallbackMatch.Groups[1].Value.Trim();
+                }
+            }
+
             return extractedData;
         }
+
     }
 
     public class OcrRequestDto
