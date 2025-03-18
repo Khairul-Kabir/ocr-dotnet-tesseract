@@ -132,26 +132,63 @@ namespace OCR.API.Controllers
         {
             var extractedData = new Dictionary<string, string>();
 
+            // Clean up the OCR text by removing unwanted characters
             ocrText = Regex.Replace(ocrText, @"[\s\W]+", " ").Trim();
 
             // Extract Name
-            var nameMatch = Regex.Match(ocrText, @"(?i)(Name|Full\s*Name)[:\s]*([A-Za-z\s]+)");
+            var nameMatch = Regex.Match(ocrText, @"(?i)(Name|Full\s*Name)[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+)*)");
             if (nameMatch.Success)
-                extractedData["Name"] = nameMatch.Groups[2].Value.Trim();
-
-            var birthMatch = Regex.Match(ocrText, @"(?i)(Birth|DOB)[^0-9]*(\d{1,2}[A-Za-z]{3}\d{4})");
-            if (birthMatch.Success)
             {
-                // Format the date as DDMMMYYYY (e.g., 02Mar1985)
-                extractedData["Date of Birth"] = birthMatch.Groups[2].Value.Trim();
+                // Attempt to clean up name errors caused by OCR artifacts (e.g., 'S5HAIENational1DCard' is invalid)
+                var extractedName = nameMatch.Groups[2].Value.Trim();
+                if (!string.IsNullOrEmpty(extractedName))
+                {
+                    // Heuristic: Try to remove unwanted strings and artifacts
+                    extractedData["Name"] = CorrectNameErrors(extractedName);
+                }
             }
 
-            // Extract ID Number
+            //var birthMatch = Regex.Match(ocrText, @"(?i)(Dateof\s*Birth|DOB)[^\d]*(\d{1,2}\s*[A-Za-z]{3}\s*\d{4})");
+            //var birthMatch = Regex.Match(ocrText, @"(?i)(Dateof\s*Bil|DOB|Dateof\s*Birth|Date\s*of\s*Birth)[^\d]*(\d{1,2}[\s\-]*[A-Za-z]{3}[\s\-]*\d{4})");
+            //if (birthMatch.Success)
+            //{
+            //    // Clean up any extra spaces and ensure the correct date format
+            //    extractedData["Date of Birth"] = birthMatch.Groups[2].Value.Trim();
+            //}
+
+            // Extract Date of Birth using a refined pattern
+            var birthMatch = Regex.Match(ocrText, @"(\d{1,2}\s*[A-Za-z]{3})\s*(\d{4})");
+            if (birthMatch.Success)
+            {
+                string dayMonth = birthMatch.Groups[1].Value.Trim(); // e.g., 29 Jan
+                string year = birthMatch.Groups[2].Value.Trim(); // e.g., 1967
+
+                // Combine to form the complete date
+                extractedData["Date of Birth"] = $"{dayMonth} {year}";
+            }
+
+            // Extract ID Number (Handles 10, 13, 16, or 17 digit numbers)
             var idMatch = Regex.Match(ocrText, @"\b(\d{10}|\d{13}|\d{16}|\d{17})\b");
             if (idMatch.Success)
+            {
                 extractedData["ID Number"] = idMatch.Groups[1].Value.Trim();
+            }
 
             return extractedData;
+        }
+
+        // A method to correct name errors caused by OCR artifacts (heuristic approach)
+        private static string CorrectNameErrors(string name)
+        {
+            // In case of obvious OCR mistakes like "S5HAIENational1DCard", attempt to correct
+            string correctedName = name;
+
+            // Remove common OCR artifacts like extra numbers and words mixed with names
+            correctedName = Regex.Replace(correctedName, @"\d+", ""); // Remove digits
+            correctedName = Regex.Replace(correctedName, @"\b(National|ID|Card)\b", ""); // Remove keywords
+            correctedName = Regex.Replace(correctedName, @"\s{2,}", " "); // Remove extra spaces
+
+            return correctedName.Trim();
         }
 
     }
